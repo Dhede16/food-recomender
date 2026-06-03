@@ -18,33 +18,21 @@
       <div class="form-card">
         <div class="form-title">
           <span class="form-icon">📍</span>
-          <h2>Tentukan Lokasi Kamu</h2>
+          <h2>Rekomendasi Tempat Makan</h2>
         </div>
-        <p class="form-subtitle">Masukkan koordinat atau gunakan lokasi otomatis untuk mendapatkan rekomendasi tempat makan terbaik</p>
+        <p class="form-subtitle" v-if="!locationReady">Mendapatkan lokasi Anda secara otomatis...</p>
+        <p class="form-subtitle" v-else>📍 Lokasi Anda: {{ form.latitude.toFixed(4) }}, {{ form.longitude.toFixed(4) }}</p>
 
         <div class="form-grid">
-          <!-- Latitude -->
+          <!-- Category Selection -->
           <div class="field">
-            <label>📍 Latitude</label>
-            <input 
-              type="number" 
-              v-model.number="form.latitude" 
-              step="0.0001" 
-              placeholder="-0.5022"
-              class="form-input"
-            />
-          </div>
-
-          <!-- Longitude -->
-          <div class="field">
-            <label>📍 Longitude</label>
-            <input 
-              type="number" 
-              v-model.number="form.longitude" 
-              step="0.0001" 
-              placeholder="117.1536"
-              class="form-input"
-            />
+            <label>🍽️ Pilih Kategori</label>
+            <select v-model="selectedCategory" class="form-input">
+              <option value="">Semua Kategori</option>
+              <option v-for="cat in availableCategories" :key="cat" :value="cat">
+                {{ cat }}
+              </option>
+            </select>
           </div>
 
           <!-- Top N -->
@@ -57,17 +45,9 @@
               <option value="20">Top 20</option>
             </select>
           </div>
-
-          <!-- Auto Location Button -->
-          <div class="field">
-            <label>&nbsp;</label>
-            <button class="btn-auto-location" @click="getLocation" title="Gunakan lokasi saya saat ini">
-              📡 Gunakan Lokasi Saya
-            </button>
-          </div>
         </div>
 
-        <button class="btn-submit" :disabled="loading" @click="getRecommendation">
+        <button class="btn-submit" :disabled="loading || !locationReady" @click="getRecommendation">
           <span v-if="loading" class="spinner"></span>
           <span v-else>🔍 Cari Rekomendasi</span>
         </button>
@@ -292,6 +272,10 @@ export default {
       result: null,
       selectedItem: null,
       map: null,
+      locationReady: false,
+      selectedCategory: '',
+      availableCategories: [],
+      allRecommendations: [],
     }
   },
   methods: {
@@ -299,23 +283,22 @@ export default {
       return parseInt(value).toLocaleString('id-ID')
     },
     
-    async getLocation() {
+    getLocation() {
       if (!navigator.geolocation) {
         this.error = 'Geolocation tidak tersedia di browser Anda'
         return
       }
       
-      this.loading = true
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           this.form.latitude = parseFloat(pos.coords.latitude.toFixed(4))
           this.form.longitude = parseFloat(pos.coords.longitude.toFixed(4))
+          this.locationReady = true
           this.error = null
-          this.loading = false
         },
         (err) => {
-          this.error = 'Gagal mendapatkan lokasi. Silakan masukkan koordinat secara manual.'
-          this.loading = false
+          this.error = 'Gagal mendapatkan lokasi. Menggunakan lokasi default.'
+          this.locationReady = true
         }
       )
     },
@@ -324,15 +307,39 @@ export default {
       this.loading = true
       this.error = null
       this.result = null
+      this.allRecommendations = []
 
       try {
         const response = await axios.post(`${API_BASE}/recommendations`, {
           latitude: parseFloat(this.form.latitude),
           longitude: parseFloat(this.form.longitude),
-          top_n: parseInt(this.form.top_n),
+          top_n: parseInt(this.form.top_n) + 10, // Fetch extra to account for filtering
         })
 
-        this.result = response.data
+        this.allRecommendations = response.data.recommendations
+
+        // Extract unique categories
+        const categories = [...new Set(response.data.recommendations.map(r => r.kategori))].sort()
+        this.availableCategories = categories
+
+        // Filter by selected category if any
+        const filtered = this.selectedCategory 
+          ? response.data.recommendations.filter(r => r.kategori === this.selectedCategory)
+          : response.data.recommendations
+
+        // Re-rank after filtering
+        const reranked = filtered
+          .slice(0, parseInt(this.form.top_n))
+          .map((item, idx) => ({
+            ...item,
+            rank: idx + 1
+          }))
+
+        this.result = {
+          user_location: response.data.user_location,
+          recommendations: reranked,
+          total_items: reranked.length
+        }
         
         // Initialize map after data is loaded
         this.$nextTick(() => {
@@ -430,10 +437,37 @@ export default {
     },
   },
 
+  watch: {
+    selectedCategory() {
+      // Re-render when category changes
+      if (this.allRecommendations.length > 0) {
+        const filtered = this.selectedCategory 
+          ? this.allRecommendations.filter(r => r.kategori === this.selectedCategory)
+          : this.allRecommendations
+
+        const reranked = filtered
+          .slice(0, parseInt(this.form.top_n))
+          .map((item, idx) => ({
+            ...item,
+            rank: idx + 1
+          }))
+
+        this.result = {
+          user_location: this.result.user_location,
+          recommendations: reranked,
+          total_items: reranked.length
+        }
+
+        this.$nextTick(() => {
+          this.initMap()
+        })
+      }
+    }
+  },
+
   mounted() {
-    // Try to load recommendations with default location
-    // Commented out to avoid auto-loading
-    // this.getRecommendation()
+    // Auto-get location on mount
+    this.getLocation()
   }
 }
 </script>

@@ -22,9 +22,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# =====================================================
-# Pydantic Models
-# =====================================================
 
 class LocationInput(BaseModel):
     latitude: float
@@ -50,9 +47,6 @@ class RecommendationResponse(BaseModel):
     total_items: int
 
 
-# =====================================================
-# Fungsi Helper
-# =====================================================
 
 def hitung_jarak(lat1, lon1, lat2, lon2):
     """
@@ -176,9 +170,7 @@ def hitung_topsis(df_topsis, bobot):
     return V
 
 
-# =====================================================
 # Endpoints
-# =====================================================
 
 @app.get("/")
 def read_root():
